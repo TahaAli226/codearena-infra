@@ -1,4 +1,13 @@
-LANGUAGES = {
+from typing import TypedDict
+
+
+class Language(TypedDict):
+    image: str
+    filename: str
+    compile: list[str] | None
+    run: list[str]
+
+LANGUAGES: dict[str,Language] = {
     "python": {
         "image": "python:3.13-slim",
         "filename": "solution.py",

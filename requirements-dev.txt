@@ -1,0 +1,4 @@
+-r runner/requirements.txt
+pytest
+ruff
+mypy

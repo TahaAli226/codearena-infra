@@ -1,7 +1,7 @@
+import json
+import os
 import subprocess
-import json 
-import os 
-import urllib.request 
+import urllib.request
 
 code_arena_repos = ["/opt/code_arena/api", "/opt/code_arena/infra"]
 deploy_script = "/opt/code_arena/infra/deploy/deploy.sh"
@@ -58,7 +58,7 @@ def main():
         updated_repos.append(output.stdout.strip())
 
     if result.returncode == 0:
-        notify_discord(f"deploy_succeeded:\n" + "\n".join(updated_repos))
+        notify_discord("deploy_succeeded:\n" + "\n".join(updated_repos))
     else:
         notify_discord(f"deploy_failed:{result.stderr[-1000:]}")
 
