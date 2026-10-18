@@ -5,8 +5,12 @@ services:
     restart: unless-stopped
     ports:
       - '8000:80'
+      - "4000:4000"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro,Z
+  dashboard:
+    image: ghcr.io/techies-lab-projects-07-codearena/codearena-frontend:dev
+    restart: unless-stopped
   api:
     build: ../api
     restart: unless-stopped
