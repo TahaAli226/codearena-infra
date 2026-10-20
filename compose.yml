@@ -11,8 +11,13 @@ services:
   dashboard:
     image: ghcr.io/techies-lab-projects-07-codearena/codearena-frontend:dev
     restart: unless-stopped
+  
+  apk:
+    image: ghcr.io/techies-lab-projects-07-codearena/codearena-apk:dev
+    restart: unless-stopped   # same as your other services
+    
   api:
-    build: ../api
+    image: ghcr.io/techies-lab-projects-07-codearena/codearena-api:dev
     restart: unless-stopped
     env_file: .env
     extra_hosts:
