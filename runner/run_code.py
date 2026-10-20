@@ -132,8 +132,3 @@ def run_code(language: str, code: str, inputs: list[str], time_limit_ms: int = 1
            results.append(run_container(image=config["image"],command=config["run"], work_dir=tmp, stdin=test_input,
                                         time_limit_ms=time_limit_ms, memory_limit_mb=memory_limit_mb))
         return {"results": results}
-        
-
-        
-
-
