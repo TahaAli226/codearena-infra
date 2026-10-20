@@ -1,9 +1,9 @@
 :80 {
-    reverse_proxy api:8000
+	reverse_proxy api:8000
 }
 :4000 {
-    handle_path /downloads/* {
-        reverse_proxy apk:80
-    }
-    reverse_proxy dashboard:80
+	handle_path /downloads/* {
+		reverse_proxy apk:80
+	}
+	reverse_proxy dashboard:80
 }
