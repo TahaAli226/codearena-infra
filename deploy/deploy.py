@@ -52,8 +52,8 @@ def write_state(name: str, value: str) -> None:
 def which_mode(path: str) -> str:
     if path in critical_files:
         return "hard"
-    if path.startswith("docs/") or path.endswith(".md"):
-        return "docs"
+    if path.startswith(("docs/", "systemd/")) or path.endswith(".md"):
+        return "pull-only"
     return "normal"
 
 
@@ -66,7 +66,7 @@ def image_commit(image: str) -> str:
 
 def main() -> None:
     changed = {}  
-    mode = "docs"
+    mode = "pull-only"
     runner_changed = False        
     requirements_changed = False  
 
@@ -81,11 +81,11 @@ def main() -> None:
         files = run(["git", "diff", "--name-only", last_good_check, new_check], cwd=path).stdout.split()
         modes = {which_mode(file) for file in files}
         if name == "infra":
-            runner_changed = any(f.startswith("runner/") and which_mode(f) != "docs" for f in files)
+            runner_changed = any(f.startswith("runner/") and which_mode(f) != "pull-only" for f in files)
             requirements_changed = "runner/requirements.txt" in files
         if "hard" in modes:
             mode = "hard"
-        elif "normal" in modes and mode == "docs":
+        elif "normal" in modes and mode == "pull-only":
             mode = "normal"
         changed[name] = new_check
 
@@ -97,7 +97,7 @@ def main() -> None:
         new_image = server_image_id(image)
         if new_image != (read_state(name) or current_image):
             changed[name] = new_image
-            if mode == "docs":
+            if mode == "pull-only":
                 mode = "normal"
 
     if not changed:
@@ -137,7 +137,7 @@ def main() -> None:
         for name, version in changed.items():
             write_state(name, version)
         write_state("failed", "")
-        if mode != "docs":
+        if mode != "pull-only":
             run(["docker", "image", "prune", "-f"])
             notify_discord(f"deploy successful ({mode}):\n{label}")
         return
