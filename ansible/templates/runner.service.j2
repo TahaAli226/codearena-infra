@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 User=runner
 Group=runner
-Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=XDG_RUNTIME_DIR=/run/user/{{ runner_uid }}
 EnvironmentFile=/etc/code_arena/runner.env
 WorkingDirectory=/opt/code_arena/infra
 ExecStartPre=/usr/bin/find /var/lib/code_arena/runs -mindepth 1 -delete

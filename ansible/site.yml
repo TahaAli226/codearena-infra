@@ -1,0 +1,359 @@
+- name: CodeArena_Server_Setup
+  hosts: servers
+  become: true
+
+  tasks:
+    - name: Install base packages
+      ansible.builtin.dnf:
+        name:
+          - git
+          - firewalld
+          - policycoreutils-python-utils
+          - dnf-plugins-core
+          - acl
+          - python3-pip
+          - python3-packaging
+        state: present
+
+    - name: Create the student user
+      ansible.builtin.user:
+        name: student
+        shell: /bin/bash
+
+    - name: Create the runner user
+      ansible.builtin.user:
+        name: runner
+        shell: /sbin/nologin
+
+    - name: Upgrade all packages
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+
+    - name: Check whether the upgrade needs a reboot
+      ansible.builtin.command: dnf needs-restarting -r
+      register: reboot_check
+      changed_when: false
+      failed_when: reboot_check.rc not in [0, 1]
+      check_mode: false
+
+    - name: Reboot into the new kernel
+      ansible.builtin.reboot:
+      when: reboot_check.rc == 1
+
+    - name: Install dnf-automatic
+      ansible.builtin.dnf:
+        name: dnf-automatic
+        state: present
+
+    - name: Configure dnf-automatic for security updates only
+      community.general.ini_file:
+        path: /etc/dnf/automatic.conf
+        section: commands
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+      loop:
+        - { option: upgrade_type, value: security }
+        - { option: download_updates, value: "yes" }
+        - { option: apply_updates, value: "yes" }
+        - { option: reboot, value: never }
+
+    - name: Enable the dnf automatic timer
+      ansible.builtin.systemd:
+        name: dnf-automatic.timer
+        enabled: true
+        state: started
+
+    - name: Harden sshd
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-hardening.conf
+        content: |
+          PermitRootLogin no
+          PasswordAuthentication no
+        owner: root
+        group: root
+        mode: "0600"
+      notify: Reload sshd
+
+    - name: Remove kernel args that switch SELinux off
+      ansible.builtin.command: grubby --update-kernel ALL --remove-args selinux
+      when: ansible_facts.cmdline.selinux is defined
+
+    - name: Set SELinux to permissive first
+      ansible.posix.selinux:
+        policy: targeted
+        state: permissive
+      when: ansible_facts.selinux.status == "disabled"
+
+    - name: Relabel every file on the next boot
+      ansible.builtin.file:
+        path: /.autorelabel
+        state: touch
+      when: ansible_facts.selinux.status == "disabled"
+
+    - name: Reboot to turn SELinux on and relabel
+      ansible.builtin.reboot:
+        reboot_timeout: 1800
+      when: ansible_facts.selinux.status == "disabled"
+
+    - name: SELinux enforcing
+      ansible.posix.selinux:
+        policy: targeted
+        state: enforcing
+
+    - name: Allow SSH in the firewall
+      ansible.posix.firewalld:
+        service: ssh
+        permanent: true
+        immediate: true
+        state: enabled
+
+    - name: Close the cockpit web console
+      ansible.posix.firewalld:
+        service: cockpit
+        permanent: true
+        immediate: true
+        state: disabled
+
+    - name: Start and enable firewalld
+      ansible.builtin.systemd:
+        name: firewalld
+        enabled: true
+        state: started
+
+    - name: Open the CodeArena ports
+      ansible.posix.firewalld:
+        port: "{{ item }}"
+        permanent: true
+        immediate: true
+        state: enabled
+      loop:
+        - 8000/tcp
+        - 4000/tcp
+
+    - name: Add the Docker repository
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/rhel/docker-ce.repo
+        dest: /etc/yum.repos.d/docker-ce.repo
+        mode: "0644"
+
+    - name: Install Docker (for the stack) and Podman (for the runner)
+      ansible.builtin.dnf:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+          - podman
+        state: present
+
+    - name: Start and enable Docker
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Let student use Docker
+      ansible.builtin.user:
+        name: student
+        groups: docker
+        append: true
+
+    - name: Create the folder for the user@ drop-in
+      ansible.builtin.file:
+        path: /etc/systemd/system/user@.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Let user services set CPU and memory limits (cgroup delegation)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/user@.service.d/delegate.conf
+        content: |
+          [Service]
+          Delegate=cpu cpuset io memory pids
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Apply the systemd reload now, before linger starts user services
+      ansible.builtin.meta: flush_handlers
+
+    - name: Give runner a user session for rootless Podman (linger)
+      ansible.builtin.command: loginctl enable-linger runner
+      args:
+        creates: /var/lib/systemd/linger/runner
+
+    - name: Create the CodeArena folders
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.owner }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: /opt/code_arena, owner: student, mode: "0755" }
+        - { path: /var/backups, owner: root, mode: "0755" }
+        - { path: /var/backups/codearena, owner: student, mode: "0700" }
+        - { path: /var/lib/code_arena, owner: root, mode: "0755" }
+        - { path: /var/lib/code_arena/runs, owner: runner, mode: "0700" }
+        - { path: /etc/code_arena, owner: root, mode: "0755" }
+
+    - name: Let student restart the runner without a password
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/codearena-deploy
+        content: |
+          student ALL=(root) NOPASSWD: /usr/bin/systemctl restart runner
+        owner: root
+        group: root
+        mode: "0440"
+        validate: visudo -cf %s
+
+    - name: Create student's SSH folders
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: student
+        group: student
+        mode: "0700"
+      loop:
+        - /home/student/.ssh
+        - /home/student/.ssh/deploy
+
+    - name: Install the infra deploy key (from Vault)
+      ansible.builtin.copy:
+        dest: /home/student/.ssh/deploy/deploy_infra
+        content: "{{ vault_deploy_infra_key }}"
+        owner: student
+        group: student
+        mode: "0600"
+      no_log: true
+
+    - name: SSH alias for the infra repo
+      ansible.builtin.copy:
+        dest: /home/student/.ssh/config
+        content: |
+          Host github-infra
+              HostName github.com
+              User git
+              IdentityFile ~/.ssh/deploy/deploy_infra
+              IdentitiesOnly yes
+        owner: student
+        group: student
+        mode: "0600"
+
+    - name: Trust GitHub's SSH host key
+      ansible.builtin.known_hosts:
+        path: /home/student/.ssh/known_hosts
+        name: github.com
+        key: "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+      become_user: student
+
+    - name: Log student in to GHCR (from Vault)
+      ansible.builtin.command:
+        cmd: docker login ghcr.io -u {{ vault_ghcr_user }} --password-stdin
+        stdin: "{{ vault_ghcr_token }}"
+        creates: /home/student/.docker/config.json
+      become_user: student
+      no_log: true
+
+    - name: Clone the infra repo
+      ansible.builtin.git:
+        repo: git@github-infra:Techies-Lab-Projects-07-CodeArena/CodeArena-Devops
+        dest: /opt/code_arena/infra
+        version: dev
+        update: false
+      become_user: student
+
+    - name: Write the env files (from Vault)
+      ansible.builtin.copy:
+        dest: "{{ item.dest }}"
+        content: "{{ item.content }}"
+        owner: "{{ item.owner }}"
+        group: "{{ item.owner }}"
+        mode: "0600"
+      loop:
+        - { dest: /opt/code_arena/infra/.env, content: "{{ vault_infra_env }}", owner: student }
+        - { dest: /etc/code_arena/deploy.env, content: "{{ vault_deploy_env }}", owner: root }
+        - { dest: /etc/code_arena/runner.env, content: "{{ vault_runner_env }}", owner: root }
+      no_log: true
+      notify: Restart runner
+
+    - name: Start the CodeArena stack
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: /opt/code_arena/infra
+      become_user: student
+      register: compose_up
+      changed_when: >-
+        'Created' in compose_up.stderr or
+        'Started' in compose_up.stderr or
+        'Recreated' in compose_up.stderr
+
+    - name: Create the runner venv
+      ansible.builtin.command:
+        cmd: python3 -m venv /opt/code_arena/infra/runner/.venv
+        creates: /opt/code_arena/infra/runner/.venv
+      become_user: student
+
+    - name: Install the runner's Python dependencies
+      ansible.builtin.pip:
+        requirements: /opt/code_arena/infra/runner/requirements.txt
+        virtualenv: /opt/code_arena/infra/runner/.venv
+      become_user: student
+
+    - name: Look up user IDs
+      ansible.builtin.getent:
+        database: passwd
+
+    - name: Set runner's UID and rootless Podman env for the next tasks
+      ansible.builtin.set_fact:
+        runner_uid: "{{ ansible_facts.getent_passwd['runner'][1] }}"
+        runner_podman_env:
+          XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd['runner'][1] }}"
+
+    - name: Build the C++ runner image (in runner's Podman)
+      ansible.builtin.command:
+        cmd: podman build -t codearena-cpp:1 /opt/code_arena/infra/runner/images/cpp
+      become_user: runner
+      environment: "{{ runner_podman_env }}"
+      register: cpp_build
+      changed_when: "'COMMIT' in cpp_build.stdout or 'Writing' in cpp_build.stderr"
+
+    - name: Pull the Python runner image (in runner's Podman)
+      ansible.builtin.command:
+        cmd: podman pull docker.io/library/python:3.13-slim
+      become_user: runner
+      environment: "{{ runner_podman_env }}"
+      register: py_pull
+      changed_when: "'Writing' in py_pull.stderr or 'Storing' in py_pull.stderr"
+
+    - name: Install the runner systemd unit (templated with runner's UID)
+      ansible.builtin.template:
+        src: templates/runner.service.j2
+        dest: /etc/systemd/system/runner.service
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Flush handlers so the unit is loaded before we start it
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and start the runner
+      ansible.builtin.systemd:
+        name: runner
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Reload sshd
+      ansible.builtin.systemd:
+        name: sshd
+        state: reloaded
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart runner
+      ansible.builtin.systemd:
+        name: runner
+        state: restarted
