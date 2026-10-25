@@ -342,6 +342,31 @@
         name: runner
         enabled: true
         state: started
+        
+    - name: Install the deploy and backup systemd units
+      ansible.builtin.copy:
+        src: "/opt/code_arena/infra/systemd/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        remote_src: true
+        mode: "0644"
+      loop:
+        - codearena-deploy.service
+        - codearena-deploy.timer
+        - codearena-backup.service
+        - codearena-backup.timer
+      notify: Reload systemd
+
+    - name: Flush handlers so the new units are loaded
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and start the deploy and backup timers
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - codearena-deploy.timer
+        - codearena-backup.timer
 
   handlers:
     - name: Reload sshd
