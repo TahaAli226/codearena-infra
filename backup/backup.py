@@ -6,7 +6,9 @@ import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+import socket
 
+server = os.environ.get("SERVER_NAME", socket.gethostname())
 discord_hook = os.environ["DISCORD_WEBHOOK"]
 compose_dir = "/opt/code_arena/infra"
 backup_dir = Path("/var/backups/codearena")
@@ -44,7 +46,7 @@ def main() -> None:
     os.umask(0o077)
 
     if shutil.disk_usage(backup_dir).free < 500 * 1024 * 1024:
-        notify_discord("backup failed: less than 500 MB free on disk")
+        notify_discord(f"[{server}] backup failed: less than 500 MB free on disk")
         sys.exit(1)
 
     backup_time = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -55,17 +57,17 @@ def main() -> None:
             result = subprocess.run(backup_cmd, cwd=compose_dir, stdout=backup_file, stderr=subprocess.PIPE, check=False, timeout=300)
         except subprocess.TimeoutExpired:
             backup_file_path.unlink()
-            notify_discord("backup failed: pg_dump timed out after 5 minutes")
+            notify_discord(f"[{server}] backup failed: pg_dump timed out after 5 minutes")
             sys.exit(1)
 
     if result.returncode != 0:
         backup_file_path.unlink()  
         error = result.stderr.decode().strip()
-        notify_discord(f"backup failed:\n{error[-500:]}")
+        notify_discord(f"[{server}] backup failed:\n{error[-500:]}")
         sys.exit(1)
 
     remove_old_backups()
-    notify_discord(f"backup succeeded: {backup_file_path.name}")
+    notify_discord(f"[{server}] backup succeeded: {backup_file_path.name}")
 
 
 if __name__ == "__main__":

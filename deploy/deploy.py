@@ -3,7 +3,9 @@ import os
 import subprocess
 import urllib.request
 from pathlib import Path
+import socket
 
+server = os.environ.get("SERVER_NAME", socket.gethostname())
 code_arena_repos = {"infra": "/opt/code_arena/infra"}
 code_arena_images = {
     "api": "ghcr.io/techies-lab-projects-07-codearena/codearena-api:dev",
@@ -139,12 +141,12 @@ def main() -> None:
         write_state("failed", "")
         if mode != "pull-only":
             run(["docker", "image", "prune", "-f"])
-            notify_discord(f"deploy successful ({mode}):\n{label}")
+            notify_discord(f"[{server}] deploy successful ({mode}):\n{label}")
         return
 
     if read_state("failed") != label:
         error = "\n".join(result.stderr.strip().splitlines()[-5:])
-        notify_discord(f"deploy failed ({mode}):\n{label}\n{error}")
+        notify_discord(f"[{server}] deploy failed ({mode}):\n{label}\n{error}")
         write_state("failed", label)
 
 
