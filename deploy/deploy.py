@@ -52,7 +52,7 @@ def write_state(name: str, value: str) -> None:
 def which_mode(path: str) -> str:
     if path in critical_files:
         return "hard"
-    if path.startswith(("docs/", "systemd/")) or path.endswith(".md"):
+    if path.startswith(("docs/", "systemd/", "ansible/")) or path.endswith(".md"):
         return "pull-only"
     return "normal"
 
