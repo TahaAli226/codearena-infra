@@ -1,20 +1,22 @@
 services:
   caddy:
-    image: caddy:2-alpine
+    image: ghcr.io/techies-lab-projects-07-codearena/codearena-caddy:dev
     container_name: caddy
     restart: unless-stopped
     ports:
       - '8000:80'
       - "4000:4000"
+    env_file: caddy/caddy.env
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro,Z
+      - caddy_data:/data
   dashboard:
     image: ghcr.io/techies-lab-projects-07-codearena/codearena-frontend:dev
     restart: unless-stopped
   
   apk:
     image: ghcr.io/techies-lab-projects-07-codearena/codearena-apk:dev
-    restart: unless-stopped   # same as your other services
+    restart: unless-stopped
     
   api:
     image: ghcr.io/techies-lab-projects-07-codearena/codearena-api:dev
@@ -42,3 +44,4 @@ services:
 
 volumes:
   pgdata:
+  caddy_data: 
