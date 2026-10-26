@@ -11,6 +11,7 @@ code_arena_images = {
     "api": "ghcr.io/techies-lab-projects-07-codearena/codearena-api:dev",
     "dashboard": "ghcr.io/techies-lab-projects-07-codearena/codearena-frontend:dev",
     "apk": "ghcr.io/techies-lab-projects-07-codearena/codearena-apk:dev",
+    "caddy": "ghcr.io/techies-lab-projects-07-codearena/codearena-caddy:dev",
 }
 discord_hook = os.environ["DISCORD_WEBHOOK"]
 state_dir = Path(os.environ.get("STATE_DIRECTORY", "/var/lib/codearena-deploy"))
