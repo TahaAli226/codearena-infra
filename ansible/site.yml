@@ -130,6 +130,7 @@
       loop:
         - 8000/tcp
         - 4000/tcp
+        - 4007/tcp
 
     - name: Add the Docker repository
       ansible.builtin.get_url:
@@ -273,6 +274,7 @@
         mode: "0600"
       loop:
         - { dest: /opt/code_arena/infra/.env, content: "{{ vault_infra_env }}", owner: student }
+        - { dest: /opt/code_arena/infra/caddy/caddy.env, content: "{{ vault_caddy_env }}", owner: student }
         - { dest: /etc/code_arena/deploy.env, content: "{{ vault_deploy_env }}", owner: root }
         - { dest: /etc/code_arena/runner.env, content: "{{ vault_runner_env }}", owner: root }
       no_log: true
@@ -342,7 +344,7 @@
         name: runner
         enabled: true
         state: started
-        
+
     - name: Install the deploy and backup systemd units
       ansible.builtin.copy:
         src: "/opt/code_arena/infra/systemd/{{ item }}"

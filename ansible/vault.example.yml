@@ -1,0 +1,26 @@
+# Copy to group_vars/servers/vault.yml, fill in real values,
+# then encrypt: ansible-vault encrypt group_vars/servers/vault.yml
+
+vault_deploy_infra_key: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  change-me
+  -----END OPENSSH PRIVATE KEY-----
+
+vault_ghcr_user: change-me
+vault_ghcr_token: change-me
+
+vault_infra_env: |
+  # same keys as infra/.env.example
+  POSTGRES_USER=change-me
+
+vault_deploy_env: |
+  # same keys as deploy/deploy.env.example
+  DISCORD_WEBHOOK=change-me
+
+vault_runner_env: |
+  # same keys as runner.env
+  RUNNER_SECRET_KEY=change-me
+  CONTAINER_CLI=podman
+
+vault_caddy_env: |
+  DUCKDNS_TOKEN=change-me
