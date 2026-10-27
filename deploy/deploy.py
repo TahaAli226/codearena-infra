@@ -16,8 +16,8 @@ code_arena_images = {
 discord_hook = os.environ["DISCORD_WEBHOOK"]
 state_dir = Path(os.environ.get("STATE_DIRECTORY", "/var/lib/codearena-deploy"))
 compose_dir = code_arena_repos["infra"]
-critical_files = ("compose.yml", "Caddyfile")
-services = ["caddy", "api", "dashboard", "apk"]  
+critical_files = ("compose.yml", "Caddyfile", "monitoring/agent/agent.yml")
+services = ["caddy", "api", "dashboard", "apk", "node-exporter", "prometheus-agent"]  
 runner_pip = f"{compose_dir}/runner/.venv/bin/pip"
 
 
@@ -55,7 +55,7 @@ def write_state(name: str, value: str) -> None:
 def which_mode(path: str) -> str:
     if path in critical_files:
         return "hard"
-    if path.startswith(("docs/", "systemd/", "ansible/", "deploy/")) or path.endswith(".md"):
+    if path.startswith(("docs/", "systemd/", "ansible/", "deploy/", "monitoring/")) or path.endswith(".md"):
         return "pull-only"
     return "normal"
 

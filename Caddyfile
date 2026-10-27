@@ -1,3 +1,7 @@
+{
+	metrics
+}
+
 codearena-iq.duckdns.org:4000 {
 	tls {
 		dns duckdns {env.DUCKDNS_TOKEN}
@@ -14,4 +18,8 @@ codearena-iq.duckdns.org:4000 {
 	handle {
 		reverse_proxy dashboard:80
 	}
+}
+
+:2020 {
+	metrics
 }

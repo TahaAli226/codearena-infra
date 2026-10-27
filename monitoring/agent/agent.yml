@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: node
+    static_configs:
+      - targets: ["host.docker.internal:9100"]
+        labels:
+          instance: lab07
+
+  - job_name: caddy
+    static_configs:
+      - targets: ["caddy:2020"]
+        labels:
+          instance: lab07
+
+remote_write:
+  - url: https://codearena-iq-monitoring.duckdns.org/api/v1/write
+    basic_auth:
+      username: lab07
+      password_file: /etc/prometheus/push_password
