@@ -4,7 +4,6 @@ services:
     container_name: caddy
     restart: unless-stopped
     ports:
-      - '8000:80'
       - "4000:4000"
       - "4007:4000"
     env_file: caddy/caddy.env
