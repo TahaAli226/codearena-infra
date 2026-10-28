@@ -1,5 +1,11 @@
-- name: CodeArena_Server_Setup
-  hosts: servers
+# CodeArena server setup.
+#   play 1 (all)        - base every server gets
+#   play 2 (servers)    - the CodeArena app stack + runner + monitoring agent
+#   play 3 (monitoring) - Prometheus + Grafana + blackbox behind Caddy
+# A host's role is decided by its group in inventory.ini.
+
+- name: Base setup (every server)
+  hosts: all
   become: true
 
   tasks:
@@ -19,11 +25,6 @@
       ansible.builtin.user:
         name: student
         shell: /bin/bash
-
-    - name: Create the runner user
-      ansible.builtin.user:
-        name: runner
-        shell: /sbin/nologin
 
     - name: Upgrade all packages
       ansible.builtin.dnf:
@@ -121,23 +122,13 @@
         enabled: true
         state: started
 
-    - name: Open the CodeArena ports
-      ansible.posix.firewalld:
-        port: "{{ item }}"
-        permanent: true
-        immediate: true
-        state: enabled
-      loop:
-        - 4000/tcp
-        - 4007/tcp
-
     - name: Add the Docker repository
       ansible.builtin.get_url:
         url: https://download.docker.com/linux/rhel/docker-ce.repo
         dest: /etc/yum.repos.d/docker-ce.repo
         mode: "0644"
 
-    - name: Install Docker (for the stack) and Podman (for the runner)
+    - name: Install Docker
       ansible.builtin.dnf:
         name:
           - docker-ce
@@ -145,7 +136,6 @@
           - containerd.io
           - docker-buildx-plugin
           - docker-compose-plugin
-          - podman
         state: present
 
     - name: Start and enable Docker
@@ -160,53 +150,13 @@
         groups: docker
         append: true
 
-    - name: Create the folder for the user@ drop-in
+    - name: Create the CodeArena base folder
       ansible.builtin.file:
-        path: /etc/systemd/system/user@.service.d
+        path: /opt/code_arena
         state: directory
+        owner: student
+        group: student
         mode: "0755"
-
-    - name: Let user services set CPU and memory limits (cgroup delegation)
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/user@.service.d/delegate.conf
-        content: |
-          [Service]
-          Delegate=cpu cpuset io memory pids
-        mode: "0644"
-      notify: Reload systemd
-
-    - name: Apply the systemd reload now, before linger starts user services
-      ansible.builtin.meta: flush_handlers
-
-    - name: Give runner a user session for rootless Podman (linger)
-      ansible.builtin.command: loginctl enable-linger runner
-      args:
-        creates: /var/lib/systemd/linger/runner
-
-    - name: Create the CodeArena folders
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: directory
-        owner: "{{ item.owner }}"
-        group: "{{ item.owner }}"
-        mode: "{{ item.mode }}"
-      loop:
-        - { path: /opt/code_arena, owner: student, mode: "0755" }
-        - { path: /var/backups, owner: root, mode: "0755" }
-        - { path: /var/backups/codearena, owner: student, mode: "0700" }
-        - { path: /var/lib/code_arena, owner: root, mode: "0755" }
-        - { path: /var/lib/code_arena/runs, owner: runner, mode: "0700" }
-        - { path: /etc/code_arena, owner: root, mode: "0755" }
-
-    - name: Let student restart the runner without a password
-      ansible.builtin.copy:
-        dest: /etc/sudoers.d/codearena-deploy
-        content: |
-          student ALL=(root) NOPASSWD: /usr/bin/systemctl restart runner
-        owner: root
-        group: root
-        mode: "0440"
-        validate: visudo -cf %s
 
     - name: Create student's SSH folders
       ansible.builtin.file:
@@ -264,6 +214,85 @@
         update: false
       become_user: student
 
+  handlers:
+    - name: Reload sshd
+      ansible.builtin.systemd:
+        name: sshd
+        state: reloaded
+
+
+- name: CodeArena app servers
+  hosts: servers
+  become: true
+
+  tasks:
+    - name: Create the runner user
+      ansible.builtin.user:
+        name: runner
+        shell: /sbin/nologin
+
+    - name: Install Podman (for the runner's sandboxes)
+      ansible.builtin.dnf:
+        name: podman
+        state: present
+
+    - name: Open the CodeArena ports
+      ansible.posix.firewalld:
+        port: "{{ item }}"
+        permanent: true
+        immediate: true
+        state: enabled
+      loop:
+        - 4000/tcp
+        - 4007/tcp
+
+    - name: Create the folder for the user@ drop-in
+      ansible.builtin.file:
+        path: /etc/systemd/system/user@.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Let user services set CPU and memory limits (cgroup delegation)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/user@.service.d/delegate.conf
+        content: |
+          [Service]
+          Delegate=cpu cpuset io memory pids
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Apply the systemd reload now, before linger starts user services
+      ansible.builtin.meta: flush_handlers
+
+    - name: Give runner a user session for rootless Podman (linger)
+      ansible.builtin.command: loginctl enable-linger runner
+      args:
+        creates: /var/lib/systemd/linger/runner
+
+    - name: Create the CodeArena app folders
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.owner }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: /var/backups, owner: root, mode: "0755" }
+        - { path: /var/backups/codearena, owner: student, mode: "0700" }
+        - { path: /var/lib/code_arena, owner: root, mode: "0755" }
+        - { path: /var/lib/code_arena/runs, owner: runner, mode: "0700" }
+        - { path: /etc/code_arena, owner: root, mode: "0755" }
+
+    - name: Let student restart the runner without a password
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/codearena-deploy
+        content: |
+          student ALL=(root) NOPASSWD: /usr/bin/systemctl restart runner
+        owner: root
+        group: root
+        mode: "0440"
+        validate: visudo -cf %s
+
     - name: Write the env files (from Vault)
       ansible.builtin.copy:
         dest: "{{ item.dest }}"
@@ -278,6 +307,16 @@
         - { dest: /etc/code_arena/runner.env, content: "{{ vault_runner_env }}", owner: root }
       no_log: true
       notify: Restart runner
+
+    # Read by the prometheus-agent container, which runs as nobody (65534).
+    - name: Write the monitoring agent's push password (from Vault)
+      ansible.builtin.copy:
+        dest: /opt/code_arena/infra/monitoring/agent/push_password
+        content: "{{ vault_push_password }}"
+        owner: "65534"
+        group: "65534"
+        mode: "0400"
+      no_log: true
 
     - name: Start the CodeArena stack
       ansible.builtin.command:
@@ -370,11 +409,6 @@
         - codearena-backup.timer
 
   handlers:
-    - name: Reload sshd
-      ansible.builtin.systemd:
-        name: sshd
-        state: reloaded
-
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: true
@@ -383,3 +417,39 @@
       ansible.builtin.systemd:
         name: runner
         state: restarted
+
+
+- name: Monitoring server
+  hosts: monitoring
+  become: true
+
+  tasks:
+    - name: Open HTTPS for Grafana and the metrics push endpoint
+      ansible.posix.firewalld:
+        port: 443/tcp
+        permanent: true
+        immediate: true
+        state: enabled
+
+    - name: Write the monitoring env files (from Vault)
+      ansible.builtin.copy:
+        dest: "{{ item.dest }}"
+        content: "{{ item.content }}"
+        owner: student
+        group: student
+        mode: "0600"
+      loop:
+        - { dest: /opt/code_arena/infra/monitoring/caddy.env, content: "{{ vault_monitoring_caddy_env }}" }
+        - { dest: /opt/code_arena/infra/monitoring/grafana.env, content: "{{ vault_grafana_env }}" }
+      no_log: true
+
+    - name: Start the monitoring stack
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: /opt/code_arena/infra/monitoring
+      become_user: student
+      register: monitoring_up
+      changed_when: >-
+        'Created' in monitoring_up.stderr or
+        'Started' in monitoring_up.stderr or
+        'Recreated' in monitoring_up.stderr
