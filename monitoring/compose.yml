@@ -28,6 +28,11 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro,Z
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.29.1
+    restart: unless-stopped
+
 volumes:
   caddy_data:
   prometheus_data:
