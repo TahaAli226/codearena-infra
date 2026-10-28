@@ -8,6 +8,21 @@
   hosts: all
   become: true
 
+  pre_tasks:
+    - name: Confirm before changing servers for real
+      ansible.builtin.pause:
+        prompt: "About to CHANGE {{ ansible_play_hosts | join(', ') }} for real. Type 'yes' to continue, anything else (or Ctrl+C, then A) aborts"
+      register: confirm
+      when: not ansible_check_mode
+      run_once: true
+
+    - name: Stop unless confirmed
+      ansible.builtin.assert:
+        that: confirm.user_input == "yes"
+        fail_msg: "Not confirmed, nothing was changed."
+      when: not ansible_check_mode
+      run_once: true
+
   tasks:
     - name: Install base packages
       ansible.builtin.dnf:
