@@ -1,14 +1,25 @@
 services:
   caddy:
-    image: caddy:2-alpine
+    image: ghcr.io/techies-lab-projects-07-codearena/codearena-caddy:dev
     container_name: caddy
     restart: unless-stopped
     ports:
-      - '8000:80'
+      - "4000:4000"
+      - "4007:4000"
+    env_file: caddy/caddy.env
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro,Z
+      - caddy_data:/data
+  dashboard:
+    image: ghcr.io/techies-lab-projects-07-codearena/codearena-frontend:dev
+    restart: unless-stopped
+  
+  apk:
+    image: ghcr.io/techies-lab-projects-07-codearena/codearena-apk:dev
+    restart: unless-stopped
+    
   api:
-    build: ../api
+    image: ghcr.io/techies-lab-projects-07-codearena/codearena-api:dev
     restart: unless-stopped
     env_file: .env
     extra_hosts:
@@ -16,6 +27,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 300m
+    cpus: 0.5
+    pids_limit: 200
+
   db:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -30,6 +50,33 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    
+  node-exporter:
+    image: prom/node-exporter:v1.10.2
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=172.17.0.1:9100
+    volumes:
+      - /:/host:ro,rslave
+
+  prometheus-agent:
+    image: prom/prometheus:v3.15.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/agent.yml
+      - --agent
+      - --storage.agent.path=/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./monitoring/agent/agent.yml:/etc/prometheus/agent.yml:ro,Z
+      - ./monitoring/agent/push_password:/etc/prometheus/push_password:ro,Z
+      - agent_data:/prometheus
 
 volumes:
   pgdata:
+  caddy_data: 
+  agent_data:

@@ -1,11 +1,11 @@
 import os
 import secrets
+import threading
 from typing import Literal
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
-from .run_code import run_code
-import threading 
 from .config import MAX_CONCURRENT
+from .run_code import run_code
 
 runner_secret = os.environ.get("RUNNER_SECRET_KEY")
 check_point = threading.BoundedSemaphore(MAX_CONCURRENT)

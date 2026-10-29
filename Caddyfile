@@ -1,3 +1,34 @@
-:80 {
-    reverse_proxy api:8000
+{
+	order rate_limit before basic_auth
+
+	metrics
+}
+
+codearena-iq.duckdns.org:4000 {
+	tls {
+		dns duckdns {env.DUCKDNS_TOKEN}
+	}
+
+	handle_path /downloads/* {
+		reverse_proxy apk:80
+	}
+
+	handle_path /api/* {
+		rate_limit {
+			zone api_per_ip {
+				key {remote_host}
+				events 300
+				window 10s
+			}
+		}
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy dashboard:80
+	}
+}
+
+:2020 {
+	metrics
 }

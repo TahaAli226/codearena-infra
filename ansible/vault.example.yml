@@ -1,0 +1,57 @@
+# Template for the Ansible vault. Copy to group_vars/all/vault.yml,
+# fill in real values, then encrypt:
+#   ansible-vault encrypt group_vars/all/vault.yml
+# group_vars/all/ = loaded for every host (app servers and monitoring).
+
+# --- Shared (every server) ---------------------------------------------------
+
+# SSH deploy key for the infra repo -> /home/student/.ssh/deploy/deploy_infra
+vault_deploy_infra_key: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  change-me
+  -----END OPENSSH PRIVATE KEY-----
+
+# GHCR login for pulling the private images -> student's docker login
+vault_ghcr_user: change-me
+vault_ghcr_token: change-me
+
+
+# --- App servers ([servers]) -------------------------------------------------
+
+# api + db settings -> /opt/code_arena/infra/.env (same keys as infra/.env.example)
+vault_infra_env: |
+  POSTGRES_USER=change-me
+
+# deploy + backup services -> /etc/code_arena/deploy.env (keys: deploy/deploy.env.example)
+vault_deploy_env: |
+  DISCORD_WEBHOOK=change-me
+
+# code runner -> /etc/code_arena/runner.env
+vault_runner_env: |
+  RUNNER_SECRET_KEY=change-me
+  CONTAINER_CLI=podman
+
+# app Caddy, DNS-01 certs -> /opt/code_arena/infra/caddy/caddy.env
+vault_caddy_env: |
+  DUCKDNS_TOKEN=change-me
+
+# plaintext password the monitoring agent pushes with
+#   -> /opt/code_arena/infra/monitoring/agent/push_password (owner 65534, 0400)
+# its bcrypt hash goes in PUSH_HASH below
+vault_push_password: change-me
+
+
+# --- Monitoring server ([monitoring]) ----------------------------------------
+
+# monitoring Caddy: certs + push auth -> /opt/code_arena/infra/monitoring/caddy.env
+# PUSH_HASH = output of: caddy hash-password  (keep the single quotes)
+vault_monitoring_caddy_env: |
+  DUCKDNS_TOKEN=change-me
+  PUSH_USER=change-me
+  PUSH_HASH='change-me'
+
+# Grafana admin, public URL, Discord alerts -> /opt/code_arena/infra/monitoring/grafana.env
+vault_grafana_env: |
+  GF_SECURITY_ADMIN_PASSWORD=change-me
+  GF_SERVER_ROOT_URL=https://your-monitoring-name.duckdns.org/
+  DISCORD_ALERT_WEBHOOK=change-me

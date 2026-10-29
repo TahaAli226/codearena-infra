@@ -1,0 +1,19 @@
+[Unit]
+Description=CodeArena code runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=runner
+Group=runner
+Environment=XDG_RUNTIME_DIR=/run/user/{{ runner_uid }}
+EnvironmentFile=/etc/code_arena/runner.env
+WorkingDirectory=/opt/code_arena/infra
+ExecStartPre=/usr/bin/find /var/lib/code_arena/runs -mindepth 1 -delete
+ExecStartPre=/bin/sh -c 'podman ps -aq --filter label=codearena | xargs -r podman rm -f'
+ExecStart=/opt/code_arena/infra/runner/.venv/bin/uvicorn runner.main:app --host 172.17.0.1 --port 9500
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

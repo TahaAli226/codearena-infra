@@ -2,3 +2,5 @@
 __pycache__/
 .venv/
 *.sql
+dev_tests.py
+push_password

@@ -1,5 +1,5 @@
 [Unit]
-Description=Code arena deploy 
+Description=Code arena deploy
 Wants=network-online.target
 After=network-online.target
 
@@ -8,4 +8,5 @@ Type=oneshot
 User=student
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/etc/code_arena/deploy.env
+StateDirectory=codearena-deploy
 ExecStart=/usr/bin/python3 /opt/code_arena/infra/deploy/deploy.py

@@ -1,13 +1,21 @@
-import subprocess 
-import tempfile
-from pathlib import Path
-import uuid
-from .languages import LANGUAGES
-from .config import MAX_FILE_SIZE, MAX_OUTPUT, MAX_PIDS, MAX_CPU_UTILIZATION, MAX_TMPFS_SIZE
-import json 
-from datetime import datetime
-import os 
+import json
 import logging
+import os
+import subprocess
+import tempfile
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from .config import (
+    MAX_CPU_UTILIZATION,
+    MAX_FILE_SIZE,
+    MAX_OUTPUT,
+    MAX_PIDS,
+    MAX_TMPFS_SIZE,
+    CONTAINER_CLI,
+)
+from .languages import LANGUAGES
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +27,7 @@ def inspect_container_time(name: str) -> dict:
     default = {"execution_time_ms": None, "oom_killed": False}
     try:
         out = subprocess.run(
-            ["docker", "inspect", "--format", "{{json .State}}", name],
+            [CONTAINER_CLI, "inspect", "--format", "{{json .State}}", name],
             capture_output=True, text=True, timeout=10,
         )
     except subprocess.TimeoutExpired:
@@ -52,12 +60,12 @@ def status_map(exit_code: int, hit_memory_limit: bool = False) -> str:
 def run_container(image: str, command: list[str], work_dir: str, stdin: str = "", time_limit_ms: int = 1000, memory_limit_mb: int =256, read_only: bool = True) -> dict:
         name = f"run-{uuid.uuid4().hex[:10]}"
         permission = "ro" if read_only else "rw"
-
+        userns = ["--userns=keep-id"] if CONTAINER_CLI == "podman" else ["--user", f"{os.getuid()}:{os.getgid()}"]
         try:
-            output = subprocess.run(["docker", "run", "-i", "-v", f"{work_dir}:/code:{permission},Z", "--name", name,
+            output = subprocess.run([CONTAINER_CLI, "run", "-i", "-v", f"{work_dir}:/code:{permission},Z", "--name", name,
                                 "--network", "none", "--memory", f"{memory_limit_mb}m", "--memory-swap",
                                 f"{memory_limit_mb}m", "--cpus", f"{MAX_CPU_UTILIZATION}", "--ulimit", f"fsize={MAX_FILE_SIZE}",
-                                "--cap-drop", "ALL", "--security-opt","no-new-privileges","--user",f"{os.getuid()}:{os.getgid()}",
+                                "--cap-drop", "ALL", "--security-opt","no-new-privileges",*userns,
                                 "--pids-limit", f"{MAX_PIDS}", "--read-only", "--tmpfs", f"/tmp:size={MAX_TMPFS_SIZE}m,mode=1777","--label", "codearena",
                                 image,"timeout", f"{time_limit_ms / 1000}", *command ],
                                 input=stdin , capture_output=True, text=True, timeout=time_limit_ms / 1000 + 10, encoding="utf-8", errors="replace"
@@ -73,7 +81,7 @@ def run_container(image: str, command: list[str], work_dir: str, stdin: str = ""
         
         except subprocess.TimeoutExpired:
             try:
-                subprocess.run(["docker", "kill", name], capture_output=True, timeout=10)
+                subprocess.run([CONTAINER_CLI, "kill", name], capture_output=True, timeout=10)
             except (FileNotFoundError, subprocess.TimeoutExpired) as e:
                 log.warning("cleanup failed: %s", e)
 
@@ -88,7 +96,7 @@ def run_container(image: str, command: list[str], work_dir: str, stdin: str = ""
         except FileNotFoundError:
             return {
             "stdout": "",
-            "stderr": "docker does not exist on the system's path",
+            "stderr": f"{CONTAINER_CLI} does not exist on the system's path",
             "exit_code": None,
             "status": "internal_error",
             "execution_time_ms": None
@@ -96,7 +104,7 @@ def run_container(image: str, command: list[str], work_dir: str, stdin: str = ""
 
         finally:
             try:
-                subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=10)
+                subprocess.run([CONTAINER_CLI, "rm", "-f", name], capture_output=True, timeout=10)
             except (FileNotFoundError, subprocess.TimeoutExpired) as e:
                 log.warning("cleanup failed: %s", e)
            
@@ -125,8 +133,3 @@ def run_code(language: str, code: str, inputs: list[str], time_limit_ms: int = 1
            results.append(run_container(image=config["image"],command=config["run"], work_dir=tmp, stdin=test_input,
                                         time_limit_ms=time_limit_ms, memory_limit_mb=memory_limit_mb))
         return {"results": results}
-        
-
-        
-
-
