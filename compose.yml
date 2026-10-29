@@ -27,6 +27,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 300m
+    cpus: 0.5
+    pids_limit: 200
+
   db:
     image: postgres:17-alpine
     restart: unless-stopped
