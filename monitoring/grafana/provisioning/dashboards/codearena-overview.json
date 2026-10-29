@@ -94,7 +94,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\", instance=\"lab07\"}[5m])))",
+          "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\", instance=\"lab07\"}[1m])))",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -868,7 +868,7 @@
     }
   ],
   "preload": false,
-  "refresh": "",
+  "refresh": "30s",
   "schemaVersion": 42,
   "time": {
     "from": "now-6h",
