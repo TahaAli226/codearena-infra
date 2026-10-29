@@ -1,4 +1,6 @@
 {
+	order rate_limit before basic_auth
+
 	metrics
 }
 
@@ -12,6 +14,13 @@ codearena-iq.duckdns.org:4000 {
 	}
 
 	handle_path /api/* {
+		rate_limit {
+			zone api_per_ip {
+				key {remote_host}
+				events 300
+				window 10s
+			}
+		}
 		reverse_proxy api:8000
 	}
 
