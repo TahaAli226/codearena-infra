@@ -1,99 +1,86 @@
-# Runner-Overview 
+# Runner
 
-- The runner executes code submitted by CodeArena users. The Backend calls the runner's Fastapi endpoint with the desired programming language,
-  the user's code and the test inputs, with each input running in its own isolated docker container and returns the output for each.
+## Overview
+The runner executes code submitted by CodeArena users. The API calls the runner's FastAPI endpoint with the language, the user's code and the test inputs. Each input runs in its own isolated, short-lived container, and the runner returns the output and status for each.
 
+The runner is a systemd service (`runner.service`) running as the `runner` user. Sandboxes run in **rootless Podman** as that user: `runner` has no login shell, no sudo and is not in the docker group, so even an escape from a sandbox lands as an unprivileged user.
 
-# How a run works 
-
+## How a run works
 ```
 POST /run → main.py → run_code() → run_container() (per input) → results
 ```
 
-## API (main.py)
+### API (`main.py`)
+- Validates the request (language, code size, input count, limits)
+- Checks the secret key in the request header
+- Takes a slot or waits for one: only `RUNNER_MAX_CONCURRENT` runs execute at once, the rest queue
+- Calls `run_code()` and releases the slot when it finishes
 
-- Validates the request (language, code size, input count, limits )
+### Engine (`run_code.py`)
+`run_code()`
+- Looks up the language in `languages.py`
+- Creates a temp dir and writes the code file into it
+- C++ is compiled once for all inputs; on failure every input returns `compile_error`
+- Calls `run_container()` for each input
+- The temp dir is deleted automatically
 
-- Checks the secret-key inside the header 
+`run_container()`
+- Gives each container a unique name and mounts the temp dir as `/code`
+- Starts the container with the flags below
+- Measures the program's run time
+- Maps the exit code to a status
+- Removes the container
 
-- Takes a slot or waits for a slot (implemented to not overwhelm the runner by allowing only a limited number of runs running at once)
+## Limits
 
-- Call `run_code()` and release the slot after finishing 
+| Limit | Value | Why |
+|---|---|---|
+| Network | none | User code can't reach the server, the internet or other containers |
+| Memory | 64 MB (`--memory` = `--memory-swap`) | Caps RAM; equal swap stops it spilling onto disk |
+| CPU | 0.5 (`--cpus`) | Half a core's worth of CPU time, so one run can't starve the server |
+| Processes | 32 (`--pids-limit`) | Stops fork bombs |
+| Time | per problem (`timeout` in the container + host backstop) | Ends infinite loops |
+| File size | `<value>` (`--ulimit fsize`) | Stops code from filling the disk |
+| `/tmp` | `<value>` (`--tmpfs`) | Caps scratch space |
+| Concurrent runs | 2 (`RUNNER_MAX_CONCURRENT`) | Caps total load; extra runs queue |
 
-## Engine (run_code.py)
+## Container flags
+- `--network none`: no network access, only loopback
+- `--memory` + `--memory-swap`: maximum memory; swap set to the same value so the container can't use disk as memory
+- `--cpus`: maximum CPU time. It's an amount of CPU time, not specific cores
+- `--ulimit fsize`: maximum size of any single file the code writes
+- `--pids-limit`: maximum number of processes (protects against fork bombs)
+- `--read-only`: the whole container filesystem is read-only, except mounts named in the command
+- `--tmpfs /tmp`: a small in-memory `/tmp` with a size cap
+- `--cap-drop ALL`: drops every Linux capability the runtime grants by default, so even root inside the container can't do privileged operations
+- `--security-opt no-new-privileges`: the program can never gain more privileges than it started with
+- `--user uid:gid`: runs the program as a non-root user inside the container
+- `/code` mounted `:ro` (read-write only for compiling), `:Z`: read-only during execution; `:Z` gives the mount the SELinux label the container needs
+- `timeout` inside the container: stops the user's program after the time limit
 
-### `run_code()`
+## Protection layers
+| Layer | Where | Limits |
+|---|---|---|
+| Rate limit | API (backend) | Per user: run 10/min, submit 5/min. Per IP: login 30/min, register 100/hour |
+| Concurrency | Runner (`RUNNER_MAX_CONCURRENT`) | Runs at once, server-wide; the rest queue |
+| Container limits | Each sandbox | Memory, CPU, processes, time, no network (table above) |
 
-- Looks up the language in `languages.py` 
+CPU limits are ceilings: if the CPU is full, runs get slower, not killed. Memory is what kills, so memory caps must add up to less than the server's RAM.
 
-- Creates a temp dir and write the code file into it 
+## Decisions
+- **Rootless Podman for sandboxes:** untrusted code never touches a root daemon. The rest of the stack uses Docker with trusted CI images.
+- **gVisor evaluated and declined:** with rootless Podman it couldn't enforce limits (a 1 GB allocation succeeded inside a 256 MB limit), and running it under root Docker would make the runner root-equivalent again. Rootless Podman with enforced limits is the safer choice.
+- **One container per test input:** each test gets its own verdict, so a crash on test 2 doesn't stop the remaining tests.
+- **Checking the `OOMKilled` flag:** exit code 137 means any SIGKILL, including a program killing itself. The flag removes the ambiguity, so only a real out-of-memory gets reported as one.
+- **Runner reachable only locally, with a secret key:** it listens on the Docker bridge (`172.17.0.1:9500`), not the internet, and the key stops other local services from using it.
+- **Startup time not counted:** the clock starts when the user's program starts, not when the container is being created.
+- **Time limit inside the container + host backstop:** `timeout` is the normal path; if it fails, a host-side timer ends the run.
 
-- For C++ compile once for all inputs (on failure it returns `compile_error` per input)
+## Service vs. job
+- Cleanup of leftover containers runs in `ExecStartPre`, so only when the service starts. That makes it safe with more than one concurrent run.
+- Runs in progress during a runner restart are lost.
+- The unit file is generated from `ansible/templates/runner.service.j2`.
 
-- For each input `run_container()` is called 
-
-- The temp dir gets deleted automatically 
-
-### `run_container()`
-
-- Each container gets a unique name, and gets a mounted temp dir as /code 
-
-- Container runs with limited privileges set by the flags
-
-- Read the container's time 
-
-- Map exit code to status 
-
-- The container gets removed 
-
-### Container-Flags
-
-- `--network none`: doesnt allow network access only loopback 
-
-- `--memory` + `--memory-swap`: set the maximum amount of memory a single container can use with memory swap set to the same value to not start eating from storage
-
-- `--cpus`: sets the maximum cpu time a container can use
-
-- `--ulimit fsize`: sets the maximum file size for any single file the code writes 
-
-- `--pids-limit`: limits the number of processes the container can create (protects against fork bombs)
-
-- `--read-only`: makes the whole container read only including root allowing only directories that are specified during the docker run command 
-
-- `--tmpfs /tmp`: limits the total size /tmp directory inside the container
-
-- `--cap-drop ALL`: docker by default gives a container 14 of the 40 capabilities linux provides for root this drops all capabilities so even if a user somehow gained 
-   root access it would be useless inside the container
-
-- `--security-opt no-new-privileges`: to prevent a user from getting any privileges aside from what he already has when the container starts
-
-- `--user uid:gid`: runs the container as a user because docker by default runs it as root 
-
-- `/code` mounted `:ro` (rw only for compile), `:Z`: mounts the directory  as read-only for code execution and read-write for compilation and allow  the container 
-   to reach the mounted directory through selinux 
-
-- `timeout` inside the container: stops the users program after a certain amount of time  
-
-# Runner Design Decisions
-
-- why: why check OOMKilled flag from docker 
-
-  ans: oom exits with code 137  which is shared with any SIGKILL or a user killing his own program by checking the flag we remove this ambiguity 
-
-- why: one container per input(test) 
-
-  ans: each test gets its own verdict so that if test 2 hits an error the rest of the tests get to run otherwise it wont
-
-- why: why is the runner only reachable locally and with a secret key 
-
-  ans: a security layer to prevent malicious attempts to exploit the runner to get access to the server and the secret key is to prevent 
-       other services from getting access to the runner 
-
-- why: startup time isn’t counted against the user
-
-  ans: so that we dont count the time docker takes to create the container, the clock starts when the user's program starts not when docker begins
-       creating the container 
-
-- why: set time limit inside the container + host backstop  
-
-  ans: the normal path is the timeout inside the container in case that failed to prevent an infinite loop we have a host backstop timer to end the process
+## Known limitations
+- `RUNNER_MAX_CONCURRENT` (2) × CPU per sandbox (0.5) = a whole core on lab07's single vCPU, so bursts of submissions slow the site. Option: concurrency 1 on lab07.
+- Runner throughput (jobs per minute) not measured yet.

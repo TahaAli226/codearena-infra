@@ -1,122 +1,80 @@
-# lab-07 - Server Setup
+# Server setup
 
-## Access
-- User: `student`
-- SSH keys only (root login disabled)
+## Overview
+| Server | Inventory name | Role | Runs |
+|---|---|---|---|
+| **lab07** | `vm7` | Production | Caddy, dashboard, API, PostgreSQL, APK downloads, runner + sandboxes, deploy and backup timers, node-exporter, Prometheus agent |
+| **myvm** | `myvm` | Monitoring | Caddy, Prometheus, Grafana, blackbox-exporter |
+Both servers are managed by the Ansible playbook (`ansible/site.yml`). myvm was built from a fresh install; lab07 was built by hand and brought under Ansible later on.
 
-## Setup
+## How it works
 
-### Update and Auto Updates
-update the system and ensure automatic security updates (only for repos that label security updates so repos that don't have security labels like docker get updated manually)
+### Step 0: bootstrap (manual, once per fresh server)
+As root on the new server:
 ```bash
-sudo dnf upgrade -y
-sudo dnf install -y dnf-automatic
-sudo vi /etc/dnf/automatic.conf
+useradd -m -G wheel <admin>
+passwd <admin>           # the password -K asks for
 ```
-change the following configs inside the file:
-```
-upgrade_type = security
-download_updates = yes
-apply_updates = yes
-reboot = never
+From the admin PC:
+```bash
+ssh-keygen -R <server-ip>                      # after a reinstall, forget the old host key
+ssh-copy-id -i ~/.ssh/<key>.pub <admin>@<server-ip>
+ssh -t <host> 'sudo -v && echo ok'             # key login + sudo work
 ```
 
-enable the automatic security updates timer and check that it's working
+### Running the playbook
+From `infra/ansible/` on the control node (the admin PC that runs Ansible). Secrets come from the vault (`group_vars/all/vault.yml`); its password is in `~/.ansible_vault_pass` on the control node, never on the servers.
 ```bash
-sudo systemctl enable --now dnf-automatic.timer
-systemctl status dnf-automatic.timer   # should be active and a trigger date 
+ansible-playbook site.yml -K --check --diff --limit <host>   # dry run: what would change
+ansible-playbook site.yml -K --limit <host>                  # real run
 ```
-reboots are manual, check if one is needed
-```bash
-sudo dnf needs-restarting -r
-```
-### sshd
-check what sshd is using
-```bash
-sudo sshd -T | grep -Ei 'passwordauthentication|permitrootlogin|pubkeyauthentication'
-```
-allow only pubkeyauthentication and disable permitrootlogin and passwordauthentication
-(in the case of this server password was off only permitroot and pubkey was active)
-we add a file instead of changing the main config to override the config
-```bash
-sudo vi /etc/ssh/sshd_config.d/00-noroot.conf
-```
+- A real run names the hosts and asks you to type `yes`; anything else aborts with nothing changed.
+- Always use `--limit`: the inventory includes prod.
 
-write the config in the file
-00-noroot.conf:
-```
-PermitRootLogin no
-```
+### What each play does
+- **all (base):** packages, full upgrade (+ reboot if needed), dnf-automatic for security updates, sshd hardening, SELinux enforcing (with relabel), firewalld (cockpit closed), Docker, deploy key, GHCR login, clone the infra repo.
+- **servers (app):** runner user (nologin, no sudo, not in the docker group), rootless Podman, ports 4000/4007, cgroup delegation + linger, app folders, sudoers rule to restart the runner, env files from the vault, start the stack, runner venv + sandbox images, `runner.service` (`templates/runner.service.j2`), deploy + backup timers.
+- **monitoring:** port 443, monitoring env files, start the monitoring stack.
 
-test the config and reload then check if it applied
-```bash
-sudo sshd -t && sudo systemctl reload sshd
-sudo sshd -T | grep -i permitroot   # should return permitrootlogin no
-```
+### After a build
+- Compose commands need `student` or sudo: env files are readable only by their owner.
+- Grafana login: `admin` + the password from the vault.
+- A fresh server has an empty DB unless a backup is restored (see `backup.md`).
 
-### SELinux
-check if SELinux is active and enforcing
-```bash
-sestatus   # should be enforcing
-```
+## Rebuild test: myvm (2026-10-29)
+myvm was reinstalled and rebuilt with the playbook: **all 3 plays `failed=0`**, API answered over HTTPS with a valid certificate, Grafana login, 5 alert rules Normal, dashboard provisioned, Discord test alert delivered.
 
-check if kernel arg turns SELinux off before the file is read
-(in this server it came back 0 that means no kernel arg is turning SELinux off if it says otherwise we need to remove the args)
-```bash
-sudo grubby --info=ALL | grep -c 'selinux=0'  # should return 0
-```
+## Bringing lab07 under Ansible (2026-10-29)
+A dry run showed lab07 differed from the playbook mainly in its env files, so it was moved under Ansible in separate, reversible steps:
 
-in case the check didn't return 0
-this command basically removes all selinux args from all kernels installed on the system (SELinux is on by default in RHEL-family kernels)
-```bash
-sudo grubby --update-kernel ALL --remove-args selinux  # needs a system reboot read below for further instructions
-```
+1. **Safety net:** copied the env files to `/root/pre-ansible` (root-only), took a fresh DB backup and saved the images, all copied off the server.
+2. **Test reboot:** all containers, the runner and both timers came back on their own, on the new kernel.
+3. **Packages by hand:** `dnf upgrade` + reboot, so the playbook run had nothing to upgrade or reboot.
+4. **Dry run:** `--check --diff --limit vm7`, every change reviewed.
+5. **Real run** with a second SSH session open (in case the sshd change blocked new logins): `failed=0`, no reboot.
+6. **Verified:** API connected to the DB, runner active, Run and Submit in C++ and Python, admin panel.
 
-in case of applying the command above make sure you set SELinux to permissive and create /.autorelabel so that any files created when selinux was off gets a label and nothing gets blocked after the reboot check if anything would be blocked
-if not switch it back to enforcing 
-```bash
-sudo sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
-sudo touch /.autorelabel        # relabels every file in the next boot
-sudo reboot
-sudo ausearch -m avc -ts boot   # checks if anything would be blocked
-sudo setenforce 1               # changes it for this boot only so you don't need to reboot
-sudo sed -i 's/^SELINUX=.*/SELINUX=enforcing/' /etc/selinux/config  # changes it for future boots 
-```
+**Rollback:** copy the files back from `/root/pre-ansible`, then `docker compose up -d --force-recreate` (and `sudo systemctl restart runner` for `runner.env`).
 
-### Firewall
-check if firewalld is active and enabled
-```bash
-systemctl status firewalld      # should be enabled + active
-sudo firewall-cmd --list-all    # to check services allowed through the firewall
-```
+### What the run changed on lab07
+- sshd hardening drop-in added (same effective config as before)
+- cockpit closed in the firewall
+- dead SSH aliases removed (`github-api`, `github-dashboard`)
+- sudoers drop-in added for the runner restart
+- `.env` and `runner.env` rewritten from the vault (values compatible: DB login and judging verified)
+- `push_password` fixed from world-readable (0644) to 0400
+- `runner.service` replaced with the templated unit
 
-if firewalld not enabled we make sure ssh is listed then enable it
-```bash
-sudo firewall-offline-cmd --list-services  # if ssh is listed you're good to enable the firewall 
-sudo systemctl enable --now firewalld
-```
+## Decisions
+- **One playbook, three plays:** every server gets the same base; the app and monitoring roles are added by inventory group, so a server's role is one line in `inventory.ini`.
+- **Secrets only in the vault:** each service gets only its own env file, written by the playbook (see the README for where each secret lives).
+- **A typed `yes` guard on real runs:** a run against the wrong host stops before changing anything.
+- **Package changes separate from config changes on prod:** upgrade and reboot by hand first, then run the playbook, so a failure points at one cause.
 
-### Docker 
-install docker and docker compose (taken from the official docker RHEL family installation docs)
-```bash
-sudo dnf -y install dnf-plugins-core
-sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
-sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo systemctl enable --now docker
-sudo usermod -aG docker student  # added to run docker commands without sudo needs logging in and out to apply 
-```
-
-### CodeArena_Setup
-make the directory  for the app and change the directory owner to the user 
-```bash
-sudo mkdir -p /opt/code_arena
-sudo chown -R student:student /opt/code_arena
-```
-
-allow port 8000 through  the firewall 
-```bash
-sudo firewall-cmd --permanent --add-port=8000/tcp
-sudo firewall-cmd --reload
-```
-
-infra files and the api files were copied to the server manually since auto deploys aren't setup yet 
+## Known limitations
+- **Every run upgrades all packages** and reboots if a core package changed. Right for fresh servers; on prod, upgrade by hand first. Future: gate upgrades behind a variable or tag.
+- **`--check` on a fresh server** fails at tasks that need packages not installed yet (dnf-automatic timer, pip). Do a real run first; use `--check --diff` on existing servers.
+- **`--start-at-task "<name>"` skips the `yes` guard.** Only use it with `--limit`.
+- **The DuckDNS token is stored twice in the vault.** Future: one shared `vault_duckdns_token`.
+- **Two tasks always report `changed`** (building the C++ image, pulling the Python image), so a rerun is never fully `changed=0`.
+- **A playbook run ends a deploy freeze:** its last task enables and starts the deploy timer. Don't run it on a frozen server.
