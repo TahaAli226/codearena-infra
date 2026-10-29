@@ -13,14 +13,21 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Validate Caddyfile
         run: >
-          docker run --rm
-          -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro"
-          caddy:2-alpine
-          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro"
+          ghcr.io/techies-lab-projects-07-codearena/codearena-caddy:dev
+          caddy adapt --config /etc/caddy/Caddyfile
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -30,5 +37,5 @@ jobs:
             runner/requirements.txt
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
-      - run: mypy runner/ deploy/
+      - run: mypy runner/ deploy/ backup/
       - run: pytest -v
