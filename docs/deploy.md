@@ -41,9 +41,9 @@ Unfreeze: `sudo systemctl enable --now codearena-deploy.timer`.
 | Container | Image | Tag | Image ID |
 |---|---|---|---|
 | caddy | codearena-caddy | dev | 20637d1f1713 |
-| api | codearena-api | dev | e5058c33f113 |
+| api | codearena-api | dev | 229550cfbcf0 |
 | apk | codearena-apk | dev | 2cb3d150a0cf |
-| dashboard | codearena-frontend | dev | 30fb76c70245 |
+| dashboard | codearena-frontend | dev | eca6a5bcffdd |
 | db | postgres | 17-alpine | b0f9560a2de0 |
 | node-exporter | prom/node-exporter | v1.10.2 | 3ac34ce007ac |
 | prometheus-agent | prom/prometheus | v3.15.1 | fa3302279710 |
