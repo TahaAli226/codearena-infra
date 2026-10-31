@@ -13,7 +13,7 @@ This repo holds everything that runs the platform:
 |---|---|
 | Platform | https://codearena-iq.duckdns.org:4007 |
 | API docs (Swagger) | https://codearena-iq.duckdns.org:4007/api/docs |
-| APK download | https://codearena-iq.duckdns.org:4007/downloads/ |
+| APK download | https://codearena-iq.duckdns.org:4007/downloads/codearena.apk |
 | Monitoring | https://codearena-iq-monitoring.duckdns.org |
 
 ## Architecture
