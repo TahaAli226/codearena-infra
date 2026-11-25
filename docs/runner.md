@@ -84,3 +84,28 @@ CPU limits are ceilings: if the CPU is full, runs get slower, not killed. Memory
 ## Known limitations
 - `RUNNER_MAX_CONCURRENT` (2) × CPU per sandbox (0.5) = a whole core on lab07's single vCPU, so bursts of submissions slow the site. Option: concurrency 1 on lab07.
 - Runner throughput (jobs per minute) not measured yet.
+- **Output is fully buffered before truncation.** `subprocess.run(capture_output=True)`
+  reads all output into the runner before `MAX_OUTPUT` (64 KB) is applied, outside the
+  sandbox limits. On lab07 a print loop pushed the runner from 43 MB to 668 MB, and
+  about 230 MB stayed allocated until restart.
+  - **Mitigation:** `MemoryMax=400M`, `MemorySwapMax=0` and concurrency 1. A flood
+    OOM-kills the runner, which restarts in 5 s; affected users see "runner unavailable"
+    and queued runs are lost. Not in Ansible yet.
+  - **Fix:** stream output with `subprocess.Popen` and kill the container once it passes
+    `MAX_OUTPUT`.
+- **The secret check fails open.** If `RUNNER_SECRET_KEY` is unset, the check is skipped.
+  Fix: refuse to start without it.
+- **Podman 6 sends rootless users to root's storage.** An unattended `dnf-automatic`
+  run (Nov 17, 2026) upgraded Podman to 6.1.1 (ALSA-2026:98554). Podman 6 applies
+  `graphroot`/`runroot` from the packaged `/usr/share/containers/storage.conf` to
+  rootless users too, so every run failed with `internal_error` (exit 125,
+  `mkdir /var/lib/containers/storage/libpod: permission denied`) while the service
+  showed active and the API returned 200.
+  - **Fix:** explicit paths in `/home/runner/.config/containers/storage.conf` (owned by
+    `runner`): `graphroot = "/home/runner/.local/share/containers/storage"`,
+    `runroot = "/run/user/994/containers"`. Not in Ansible yet.
+  - **Mitigation:** `dnf-automatic.timer` disabled Nov 18 to Dec 4 for the testing
+    freeze; afterwards, re-enable it and versionlock the Podman stack. Security-only
+    updates would not have helped, because the rebase shipped as a security advisory.
+  - **Gap:** a 200 response doesn't prove that runs work. A smoke test that checks for
+    `"status":"ok"` would have caught this.

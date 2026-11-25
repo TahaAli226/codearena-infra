@@ -55,7 +55,7 @@ Commands run on **lab07** in `/opt/code_arena/infra` unless noted. On **myvm**, 
 2. **lab07 reachable?** `ssh lab07`. If not: the VM or the gateway is down → contact the lab admins; worst case, rebuild and restore on a new server (`server_setup.md`, `backup.md`).
 3. **Containers:** `docker compose ps` → anything not Up? `docker compose logs --tail 50 <service>`
 4. **Caddy:** `docker compose logs caddy | grep -i error`. Certificate problems → see "Cert expires soon".
-5. **DNS:** `dig +short codearena-iq.duckdns.org` must return `178.18.249.160`.
+5. **DNS:** `dig +short codearena-iq.duckdns.org` must return the app server's public IP.
 
 **Fix:**
 - A crashed container: `docker compose up -d <service>`
